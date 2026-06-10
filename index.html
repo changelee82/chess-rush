@@ -986,7 +986,7 @@ function aiExecuteMove(from, to, promo) {
   // 更新棋盘数据
   const winner = executeMove(from, to, promo);
   updateUI();
-  if (winner) { renderBoard(); endGame(winner); return; }
+  if (winner) { animateMove(from, to, () => { renderBoard(); endGame(winner); }); return; }
   aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 300);
   // 动画：从旧位置滑到新位置，结束后渲染新状态
   animateMove(from, to, () => { renderBoard(); });
@@ -1182,6 +1182,7 @@ function setStatus(text, cls) {
 }
 
 // ========== 游戏结束 ==========
+let gameOverTimer = null;
 function endGame(winner) {
   stopAI();
   if (cdRAF) cancelAnimationFrame(cdRAF);
@@ -1190,11 +1191,12 @@ function endGame(winner) {
   const scoreText = winner === 'w' ? '1-0' : '0-1';
   setStatus(playerWon ? '你赢了！' : '你输了', 'ended');
   playSound(playerWon ? 'capture' : 'timeout');
-  setTimeout(() => {
+  gameOverTimer = setTimeout(() => {
+    gameOverTimer = null;
     $('#gameOverScore').textContent = scoreText;
     $('#gameOverRecord').textContent = '';
     $('#gameOverModal').classList.add('show');
-  }, 400);
+  }, 500);
 }
 
 // ========== 点击处理 ==========
@@ -1253,11 +1255,10 @@ function playerMove(from, to, promotion) {
   const winner = executeMove(from, to, promotion);
   selectedSq = null; legalTargets = [];
   updateUI();
-  if (winner) { renderBoard(); endGame(winner); return; }
+  if (winner) { animateMove(from, to, () => { renderBoard(); endGame(winner); }); return; }
   // 动画：从旧位置滑到新位置，结束后渲染新状态
   animateMove(from, to, () => { renderBoard(); });
 }
-
 // ========== 升变对话框 ==========
 function showPromotion(from, to) {
   const color = playerColor;
@@ -1299,6 +1300,7 @@ function setupLayout() {
 
 // ========== 新游戏 ==========
 function newGame() {
+  if (gameOverTimer) { clearTimeout(gameOverTimer); gameOverTimer = null; }
   stopAI();
   if (cdRAF) cancelAnimationFrame(cdRAF);
   aiColor = playerColor === 'w' ? 'b' : 'w';
@@ -1313,7 +1315,7 @@ function newGame() {
 
 // ========== 事件绑定 ==========
 $('#btnNew').onclick = newGame;
-$('#gameOverRestartBtn').onclick = newGame;
+$('#gameOverRestartBtn').onclick = () => { $('#gameOverModal').classList.remove('show'); newGame(); };
 $('#btnInfo').onclick = () => $('#infoModal').classList.add('show');
 $('#infoModal').onclick = e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove('show'); };
 $('#modalCloseBtn').onclick = () => $('#infoModal').classList.remove('show');
