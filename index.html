@@ -1097,14 +1097,18 @@ function renderBoard() {
       if (pc) { const ring = document.createElement('div'); ring.className = 'legal-ring'; div.appendChild(ring); }
       else { const dot = document.createElement('div'); dot.className = 'legal-dot'; div.appendChild(dot); }
     }
-    // 棋子
-    const existingPiece = div.querySelector('.piece');
+    // 棋子（清理所有残留棋子，防止重复）
+    const existingPieces = div.querySelectorAll('.piece');
     const needPiece = !!pc;
-    if (needPiece && !existingPiece) div.appendChild(createPieceElement(pc));
-    else if (!needPiece && existingPiece) existingPiece.remove();
-    else if (needPiece && existingPiece) {
-      if (existingPiece.dataset.type !== pc.type || existingPiece.dataset.color !== pc.color) {
-        existingPiece.remove(); div.appendChild(createPieceElement(pc));
+    if (!needPiece) {
+      existingPieces.forEach(el => el.remove());
+    } else {
+      const match = [...existingPieces].find(el => el.dataset.type === pc.type && el.dataset.color === pc.color);
+      if (match) {
+        existingPieces.forEach(el => { if (el !== match) el.remove(); });
+      } else {
+        existingPieces.forEach(el => el.remove());
+        div.appendChild(createPieceElement(pc));
       }
     }
     // 冷却 UI
@@ -1207,11 +1211,15 @@ boardEl.addEventListener('click', e => {
   const now = Date.now();
 
   if (selectedSq) {
+    // 选中格棋子已被吃掉或变成对方棋子，清除选择
+    const selPc = board[selectedSq];
+    if (!selPc || selPc.color !== playerColor) {
+      selectedSq = null; legalTargets = []; renderBoard(); return;
+    }
     if (k === selectedSq) { selectedSq = null; legalTargets = []; renderBoard(); return; }
     if (legalTargets.includes(k)) {
       // 升变检查
-      const selPc = board[selectedSq];
-      if (selPc && selPc.type === 'p' && parseInt(k[1]) === (playerColor === 'w' ? 8 : 1)) {
+      if (selPc.type === 'p' && parseInt(k[1]) === (playerColor === 'w' ? 8 : 1)) {
         showPromotion(selectedSq, k); return;
       }
       playerMove(selectedSq, k);
