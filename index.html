@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>ChessRush · Stockfish 对弈</title>
+<style>
+/* ===================== 公共样式（与国象联盟趣味训练一致） ===================== */
+
+/* ===== CSS 自定义属性 ===== */
+:root {
+  --color-primary: #5B7BC0;
+  --color-primary-rgb: 91, 123, 192;
+  --color-accent: #F5B800;
+  --color-accent-rgb: 245, 184, 0;
+  --color-danger: #e74c3c;
+  --color-success: #009944;
+  --color-error: #ff6b6b;
+  --color-text: #333;
+  --color-text-secondary: #999;
+  --color-bg: #F5F5F5;
+  --color-surface: #FFFFFF;
+}
+
+/* ===== 全局 ===== */
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+html, body {
+  height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ===== 游戏容器 ===== */
+.game-container {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+@media (min-width: 480px) and (min-height: 600px) {
+  .game-container {
+    width: 480px;
+    margin: 0 auto;
+    box-shadow: 0 0 20px rgba(0,0,0,0.1);
+  }
+}
+
+/* ===== 顶部导航栏 ===== */
+.nav-header {
+  width: 100%;
+  height: 48px;
+  background: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+.nav-back, .nav-info {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+  text-decoration: none;
+  border-radius: 50%;
+  position: relative;
+  overflow: hidden;
+  transition: background 0.2s ease;
+}
+.nav-back:hover, .nav-info:hover { background: rgba(255,255,255,0.12); }
+.nav-back:active, .nav-info:active { background: rgba(255,255,255,0.24); }
+.nav-back::after, .nav-info::after,
+.md-btn::after,
+.gameover-close::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  transition: width 0.3s ease, height 0.3s ease, opacity 0.3s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+.nav-back:active::after, .nav-info:active::after,
+.md-btn:active::after,
+.gameover-close:active::after {
+  width: 200%;
+  height: 200%;
+  opacity: 1;
+}
+.nav-back::after, .nav-info::after { background: rgba(255,255,255,0.24); }
+.md-btn::after { background: rgba(var(--color-primary-rgb),0.2); }
+.gameover-close::after { background: rgba(117,117,117,0.2); }
+.nav-title {
+  font-size: 17px;
+  font-weight: 500;
+  color: #fff;
+  text-align: center;
+}
+
+/* ===== 页面区 ===== */
+.page-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  min-width: 0;
+  gap: 0;
+}
+
+/* ===== 右侧面板 ===== */
+.right-panel {
+  display: contents;
+}
+
+/* ===== 按钮区 ===== */
+.board-area {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  grid-template-rows: auto 1fr auto;
+  padding: 3px;
+  border: 0.5px solid var(--color-primary);
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  flex-shrink: 0;
+  order: 2;
+  margin: auto 0;
+}
+
+.coord-row {
+  grid-column: 2;
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+}
+.coord-row.top { grid-row: 1; padding: 3px 0; }
+.coord-row.bottom { grid-row: 3; padding: 3px 0; }
+.coord-row span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-primary);
+}
+
+.board-middle {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  display: contents;
+}
+
+.coord-col {
+  grid-row: 2;
+  display: grid;
+  grid-template-rows: repeat(8, 1fr);
+}
+.coord-col.left { grid-column: 1; padding-right: 3px; }
+.coord-col.right { grid-column: 3; padding-left: 3px; }
+.coord-col span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-primary);
+}
+
+/* ===== 按钮区 ===== */
+.button-area {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  order: 3;
+  min-height: 48px;
+  flex: 1;
+}
+
+.toolbar {
+  width: 100%;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-height: 48px;
+  min-width: 108px;
+  gap: 0;
+}
+
+.board-wrap {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ===== 棋盘 ===== */
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  overflow: hidden;
+  position: relative;
+  user-select: none;
+  touch-action: none;
+  border: 1px solid var(--color-primary);
+}
+
+/* ===== 格子 ===== */
+.square {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: default;
+}
+.square.light { background: var(--color-surface); }
+.square.dark  { background: var(--color-primary); }
+
+/* 选中高亮 */
+.square.selected {
+  box-shadow: inset 0 0 0 3px rgba(var(--color-accent-rgb),.7);
+}
+
+/* 最后一步高亮 */
+.square.last-move.light { background: rgba(var(--color-accent-rgb),.25); }
+.square.last-move.dark { background: rgba(var(--color-primary-rgb),.75); }
+
+/* 将军高亮 */
+.square.in-check {
+  background: radial-gradient(ellipse at center, rgba(255,0,0,.6) 0%, rgba(200,0,0,.35) 50%, transparent 70%) !important;
+}
+
+/* 合法走法提示 */
+.square .legal-dot {
+  position: absolute;
+  width: 28%;
+  height: 28%;
+  border-radius: 50%;
+  background: rgba(0,0,0,.18);
+  pointer-events: none;
+  z-index: 2;
+}
+.square .legal-ring {
+  position: absolute;
+  inset: 4%;
+  border-radius: 50%;
+  border: 3px solid rgba(0,0,0,.18);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ===== 棋子 ===== */
+.piece {
+  width: 80%;
+  height: 80%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  z-index: 2;
+  transition: none;
+}
+.piece img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ===== 摇晃动画 ===== */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-6px) rotate(-3deg); }
+  30% { transform: translateX(5px) rotate(2deg); }
+  45% { transform: translateX(-4px) rotate(-2deg); }
+  60% { transform: translateX(3px) rotate(1deg); }
+  75% { transform: translateX(-2px) rotate(-1deg); }
+}
+
+/* ===== Material Design 按钮 ===== */
+.toolbar-btn {
+  width: 50%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #757575 !important;
+  cursor: pointer;
+}
+.toolbar-btn svg, .toolbar-btn img {
+  width: 20px;
+  height: 20px;
+}
+
+.md-btn {
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+  color: var(--color-primary);
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.md-btn:hover { background: rgba(var(--color-primary-rgb),0.08); }
+.md-btn:active { background: rgba(var(--color-primary-rgb),0.16); }
+
+/* ===== 对话框 ===== */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal-overlay.show { display: flex; }
+.modal-content {
+  background: var(--color-surface);
+  border-radius: 4px;
+  padding: 24px 24px 16px;
+  width: 80%;
+  max-width: 320px;
+  text-align: left;
+  box-shadow: 0 11px 15px -7px rgba(0,0,0,0.2), 0 24px 38px 3px rgba(0,0,0,0.14), 0 9px 46px 8px rgba(0,0,0,0.12);
+}
+.modal-text {
+  font-size: 16px;
+  color: rgba(0,0,0,0.87);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ===== 游戏结束对话框 ===== */
+.gameover-content {
+  position: relative;
+  text-align: center;
+  padding: 32px 24px 24px;
+}
+.gameover-close {
+  position: absolute;
+  top: 12px; right: 12px;
+  width: 32px; height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #757575;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 50%;
+  transition: background 0.2s ease;
+}
+.gameover-close:hover { background: rgba(117,117,117,0.08); }
+.gameover-close:active { background: rgba(117,117,117,0.16); }
+.gameover-close img { width: 20px; height: 20px; }
+.gameover-score {
+  font-size: 72px;
+  font-weight: 300;
+  color: var(--color-accent);
+  line-height: 1;
+  margin: 16px 0 12px;
+}
+.gameover-record {
+  font-size: 14px;
+  color: rgba(0,0,0,0.6);
+  margin-bottom: 24px;
+}
+.gameover-actions {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+}
+.gameover-btn {
+  width: 48px; height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #757575;
+  border-radius: 50%;
+}
+.gameover-btn img { width: 20px; height: 20px; }
+
+/* ===== ChessRush 专用样式 ===== */
+
+/* 状态文字 */
+.status-bar {
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-primary);
+  padding: 2px 0;
+  min-height: 22px;
+  flex-shrink: 0;
+}
+.status-bar.thinking { color: var(--color-accent); }
+.status-bar.ended { color: var(--color-danger); }
+
+/* 被吃棋子行 */
+.captured-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  font-size: 14px;
+  line-height: 1;
+  min-height: 16px;
+  padding: 1px 4px;
+  width: 100%;
+  flex-shrink: 0;
+  order: 1;
+}
+.captured-row img { width: 13px; height: 13px; object-fit: contain; margin-right: -2px; }
+.captured-row .adv { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); margin-left: 4px; }
+
+/* 升变对话框 */
+.promo-options {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 16px;
+}
+.promo-opt {
+  width: 56px; height: 56px;
+  border-radius: 8px;
+  border: 2px solid rgba(var(--color-primary-rgb),0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all .15s;
+  background: var(--color-surface);
+}
+.promo-opt:active { transform: scale(.92); border-color: var(--color-primary); }
+.promo-opt img { width: 80%; height: 80%; object-fit: contain; }
+
+/* 横屏布局 */
+.game-container.landscape .page-area {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+}
+.game-container.landscape .right-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 108px;
+  height: 100%;
+  order: 0;
+}
+.game-container.landscape .board-area {
+  width: auto;
+  height: 100%;
+  flex-shrink: 0;
+  order: -1;
+}
+.game-container.landscape .score-area {
+  flex: 1;
+  width: auto;
+  padding: 0;
+}
+.game-container.landscape .button-area {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  flex: 1;
+  min-width: 108px;
+}
+.game-container.landscape .toolbar {
+  width: 100%;
+  height: 48px;
+  min-height: 48px;
+}
+
+/* 冷却倒计时 */
+.cooldown {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0,0,0,0.65);
+  border-radius: 4px;
+  padding: 1px 4px;
+  z-index: 5;
+  pointer-events: none;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.piece.on-cooldown {
+  opacity: 0.4;
+}
+</style>
+</head>
+<body>
+<div class="game-container">
+  <!-- 顶部导航栏 -->
+  <header class="nav-header">
+    <div class="nav-back" id="btnSettings" title="设置">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </div>
+    <h1 class="nav-title">ChessRush</h1>
+    <div style="display:flex;gap:4px">
+      <div class="nav-info" id="btnInfo" title="规则">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      </div>
+
+    </div>
+  </header>
+
+  <div class="page-area">
+    <!-- 黑方吃掉的棋子（紧贴棋盘上方外侧） -->
+    <div class="captured-row" id="capTop"></div>
+
+    <!-- 棋盘区域 -->
+    <div class="board-area">
+      <div class="coord-row top" id="coordTop">
+        <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>
+      </div>
+      <div class="board-middle">
+        <div class="coord-col left" id="coordLeft">
+          <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+        </div>
+        <div class="board-wrap">
+          <div id="board" class="board"></div>
+        </div>
+        <div class="coord-col right" id="coordRight">
+          <span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+        </div>
+      </div>
+      <div class="coord-row bottom" id="coordBottom">
+        <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span>
+      </div>
+    </div>
+
+    <!-- 白方吃掉的棋子（紧贴棋盘下方外侧） -->
+    <div class="captured-row" id="capBottom"></div>
+
+    <!-- 状态栏 -->
+    <div class="status-bar" id="statusBar">你的回合</div>
+
+    <div class="right-panel">
+      <!-- 按钮区 -->
+      <div class="button-area">
+        <footer class="toolbar">
+          <button class="toolbar-btn md-btn" id="btnUndo" title="悔棋">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          </button>
+          <button class="toolbar-btn md-btn" id="btnNew" title="新局">
+            <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+          </button>
+        </footer>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 规则对话框 -->
+<div class="modal-overlay" id="infoModal">
+  <div class="modal-content">
+    <p class="modal-text" id="modalText"></p>
+    <div class="modal-actions">
+      <button class="md-btn" id="modalCloseBtn">知道了</button>
+    </div>
+  </div>
+</div>
+
+<!-- 游戏结束对话框 -->
+<div class="modal-overlay" id="gameOverModal">
+  <div class="modal-content gameover-content">
+    <button class="gameover-close" id="gameOverCloseBtn">
+      <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+    </button>
+    <div class="gameover-score" id="gameOverScore">对局结束</div>
+    <div class="gameover-record" id="gameOverRecord"></div>
+    <div class="gameover-actions">
+      <button class="gameover-btn md-btn" id="shareBtn">
+        <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>
+      </button>
+      <button class="gameover-btn md-btn" id="gameOverRestartBtn">
+        <svg width="20" height="20" viewBox="0 0 24 24"><path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 升变对话框 -->
+<div class="modal-overlay" id="promoModal">
+  <div class="modal-content gameover-content">
+    <div class="modal-text" style="text-align:center">选择升变棋子</div>
+    <div class="promo-options" id="promoOptions"></div>
+  </div>
+</div>
+
+<!-- 设置对话框 -->
+<div class="modal-overlay" id="settingsModal">
+  <div class="modal-content">
+    <p class="modal-text">
+      <strong>执棋颜色</strong><br>
+      <label style="margin-right:12px;cursor:pointer"><input type="radio" name="playerColor" value="w" checked> 执白 ♔</label>
+      <label style="cursor:pointer"><input type="radio" name="playerColor" value="b"> 执黑 ♚</label>
+      <br><br>
+      <strong>AI 难度</strong><br>
+      <label style="cursor:pointer"><input type="radio" name="skillLevel" value="1"> 新手</label>
+      <label style="margin-left:8px;cursor:pointer"><input type="radio" name="skillLevel" value="5"> 简单</label>
+      <label style="margin-left:8px;cursor:pointer"><input type="radio" name="skillLevel" value="10" checked> 中等</label>
+      <label style="margin-left:8px;cursor:pointer"><input type="radio" name="skillLevel" value="15"> 困难</label>
+      <label style="margin-left:8px;cursor:pointer"><input type="radio" name="skillLevel" value="20"> 大师</label>
+    </p>
+    <div class="modal-actions">
+      <button class="md-btn" id="settingsCancelBtn">取消</button>
+      <button class="md-btn" id="settingsOkBtn">确定</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===================== ChessRush · 实时冷却对战 ===================== */
+
+// ========== 常量 ==========
+const COOLDOWN_MS = 5000;
+const ANIM_DURATION = 180;
+const FILES = 'abcdefgh'.split('');
+const STOCKFISH_URL = 'stockfish.js';
+const PIECE_VALUE = { p:1, n:3, b:3, r:5, q:9, k:0 };
+
+// ========== 游戏状态 ==========
+let board = {};             // key -> { type, color }
+let cooldowns = {};         // key -> 冷却结束时间戳
+let castlingRights = { wK:true, wQ:true, bK:true, bQ:true };
+let epTarget = null;        // 吃过路兵目标格
+let selectedSq = null;
+let legalTargets = [];
+let lastMoveFrom = null, lastMoveTo = null;
+let gameOver = false;
+let isFlipped = false;
+let playerColor = 'w';
+let aiColor = 'b';
+let skillLevel = 10;
+let moveHistory = [];
+let wins = 0;
+
+// Stockfish
+let stockfish = null, sfReady = false;
+let aiState = 'IDLE';      // IDLE | THINKING | WAITING
+let aiTimer = null;
+
+// DOM
+const $ = s => document.querySelector(s);
+const boardEl = $('#board');
+const statusBar = $('#statusBar');
+
+// ========== 工具 ==========
+function sqKey(f, r) { return f + r; }
+function pieceNum(pc) {
+  const base = pc.color === 'w' ? 0 : 6;
+  return base + { k:1, q:2, r:3, b:4, n:5, p:6 }[pc.type];
+}
+function pieceSvgUrl(pc) { return `Chessman/fritz/${pieceNum(pc)}.svg`; }
+
+// ========== 音效 ==========
+const soundCache = {};
+['capture','check','illegal','move_self','timeout'].forEach(n => {
+  soundCache[n] = new Audio(`sounds/${n}.mp3`);
+});
+function playSound(name) {
+  try {
+    const a = soundCache[name]?.cloneNode();
+    if (a) { a.volume = 0.3; a.play().catch(() => {}); }
+  } catch(e) {}
+}
+
+// ========== 棋盘初始化 ==========
+function initBoard() {
+  board = {};
+  const back = ['r','n','b','q','k','b','n','r'];
+  for (let i = 0; i < 8; i++) {
+    board[sqKey(FILES[i],1)] = { type:back[i], color:'w' };
+    board[sqKey(FILES[i],2)] = { type:'p', color:'w' };
+    board[sqKey(FILES[i],7)] = { type:'p', color:'b' };
+    board[sqKey(FILES[i],8)] = { type:back[i], color:'b' };
+  }
+  cooldowns = {};
+  castlingRights = { wK:true, wQ:true, bK:true, bQ:true };
+  epTarget = null;
+  selectedSq = null;
+  legalTargets = [];
+  lastMoveFrom = null; lastMoveTo = null;
+  gameOver = false;
+  moveHistory = [];
+  aiState = 'IDLE';
+  if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
+}
+
+// ========== 伪合法走法生成（不检查将军/钉子） ==========
+function getPseudoLegalMoves(sq) {
+  const pc = board[sq];
+  if (!pc) return [];
+  const { type, color } = pc;
+  const f = sq[0], r = parseInt(sq[1]);
+  const fi = FILES.indexOf(f);
+  const moves = [];
+  const isEnemy = k => board[k] && board[k].color !== color;
+  const isFriend = k => board[k] && board[k].color === color;
+  const isEmpty = k => !board[k];
+  const ok = (i, r2) => i >= 0 && i < 8 && r2 >= 1 && r2 <= 8;
+  const tryAdd = k => { if (!isFriend(k)) moves.push(k); };
+  const slide = dirs => {
+    for (const [df, dr] of dirs) {
+      let ci = fi + df, cr = r + dr;
+      while (ok(ci, cr)) {
+        const nk = sqKey(FILES[ci], cr);
+        if (isEmpty(nk)) moves.push(nk);
+        else { if (isEnemy(nk)) moves.push(nk); break; }
+        ci += df; cr += dr;
+      }
+    }
+  };
+  switch (type) {
+    case 'p': {
+      const dir = color === 'w' ? 1 : -1, start = color === 'w' ? 2 : 7;
+      if (ok(fi, r + dir) && isEmpty(sqKey(f, r + dir))) {
+        moves.push(sqKey(f, r + dir));
+        if (r === start && isEmpty(sqKey(f, r + dir * 2))) moves.push(sqKey(f, r + dir * 2));
+      }
+      for (const df of [-1, 1]) {
+        const ni = fi + df;
+        if (ok(ni, r + dir)) {
+          const nk = sqKey(FILES[ni], r + dir);
+          if (isEnemy(nk)) moves.push(nk);
+          else if (nk === epTarget) {
+            // 吃过路兵：目标格旁边必须有对方刚走两格的兵
+            const epPawnSq = sqKey(nk[0], color === 'w' ? parseInt(nk[1]) - 1 : parseInt(nk[1]) + 1);
+            if (board[epPawnSq] && board[epPawnSq].type === 'p' && board[epPawnSq].color !== color) moves.push(nk);
+          }
+        }
+      }
+      break;
+    }
+    case 'n':
+      for (const [df, dr] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) {
+        if (ok(fi + df, r + dr)) tryAdd(sqKey(FILES[fi + df], r + dr));
+      }
+      break;
+    case 'b': slide([[1,1],[1,-1],[-1,1],[-1,-1]]); break;
+    case 'r': slide([[1,0],[-1,0],[0,1],[0,-1]]); break;
+    case 'q': slide([[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]); break;
+    case 'k':
+      for (const [df, dr] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]) {
+        if (ok(fi + df, r + dr)) tryAdd(sqKey(FILES[fi + df], r + dr));
+      }
+      const home = color === 'w' ? 1 : 8;
+      if (r === home) {
+        if (castlingRights[color + 'K'] && isEmpty(sqKey(FILES[5], home)) && isEmpty(sqKey(FILES[6], home)))
+          moves.push(sqKey(FILES[6], home));
+        if (castlingRights[color + 'Q'] && isEmpty(sqKey(FILES[3], home)) && isEmpty(sqKey(FILES[2], home)) && isEmpty(sqKey(FILES[1], home)))
+          moves.push(sqKey(FILES[2], home));
+      }
+      break;
+  }
+  return moves;
+}
+
+// 获取某方所有可用走法（排除冷却中的棋子）
+function getAvailableMoves(color) {
+  const now = Date.now();
+  const moves = [];
+  for (const k of Object.keys(board)) {
+    if (board[k].color === color && (!cooldowns[k] || cooldowns[k] <= now)) {
+      for (const to of getPseudoLegalMoves(k)) moves.push({ from: k, to });
+    }
+  }
+  return moves;
+}
+
+// ========== 走法执行 ==========
+function executeMove(from, to, promotion) {
+  const piece = { ...board[from] };
+  const captured = board[to] ? { ...board[to] } : null;
+  // 保存历史（完整棋盘快照）
+  moveHistory.push({
+    from, to, piece, captured, promotion,
+    prevBoard: Object.fromEntries(Object.entries(board).map(([k, v]) => [k, { ...v }])),
+    prevCooldowns: { ...cooldowns },
+    prevCastling: { ...castlingRights },
+    prevEp: epTarget,
+    prevLastFrom: lastMoveFrom, prevLastTo: lastMoveTo,
+  });
+  // 吃过路兵
+  if (piece.type === 'p' && to === epTarget) {
+    const dir = piece.color === 'w' ? -1 : 1;
+    delete board[sqKey(to[0], parseInt(to[1]) + dir)];
+  }
+  // 移动
+  board[to] = piece; delete board[from];
+  // 王车易位
+  if (piece.type === 'k' && Math.abs(FILES.indexOf(to[0]) - FILES.indexOf(from[0])) === 2) {
+    if (FILES.indexOf(to[0]) > FILES.indexOf(from[0])) {
+      board[sqKey(FILES[5], to[1])] = board[sqKey(FILES[7], to[1])];
+      delete board[sqKey(FILES[7], to[1])];
+    } else {
+      board[sqKey(FILES[3], to[1])] = board[sqKey(FILES[0], to[1])];
+      delete board[sqKey(FILES[0], to[1])];
+    }
+  }
+  // 升变
+  if (piece.type === 'p' && parseInt(to[1]) === (piece.color === 'w' ? 8 : 1)) {
+    board[to] = { type: promotion || 'q', color: piece.color };
+  }
+  // 过路兵目标
+  epTarget = (piece.type === 'p' && Math.abs(parseInt(to[1]) - parseInt(from[1])) === 2)
+    ? sqKey(from[0], (parseInt(from[1]) + parseInt(to[1])) / 2) : null;
+  // 易位权利
+  if (piece.type === 'k') { castlingRights[piece.color + 'K'] = false; castlingRights[piece.color + 'Q'] = false; }
+  if (piece.type === 'r') {
+    if (from === 'a1') castlingRights.wQ = false; if (from === 'h1') castlingRights.wK = false;
+    if (from === 'a8') castlingRights.bQ = false; if (from === 'h8') castlingRights.bK = false;
+  }
+  for (const t of [to]) {
+    if (t === 'a1') castlingRights.wQ = false; if (t === 'h1') castlingRights.wK = false;
+    if (t === 'a8') castlingRights.bQ = false; if (t === 'h8') castlingRights.bK = false;
+  }
+  // 冷却
+  delete cooldowns[from];
+  cooldowns[to] = Date.now() + COOLDOWN_MS;
+  lastMoveFrom = from; lastMoveTo = to;
+  // 音效
+  if (captured) playSound('capture'); else playSound('move_self');
+  // 王被吃？
+  if (captured && captured.type === 'k') { gameOver = true; return captured.color === 'w' ? 'b' : 'w'; }
+  return null;
+}
+
+// ========== 悔棋 ==========
+function undoMove() {
+  if (!moveHistory.length || gameOver) return;
+  finishPendingAnimation();
+  const h = moveHistory.pop();
+  board = h.prevBoard;
+  cooldowns = h.prevCooldowns;
+  castlingRights = h.prevCastling;
+  epTarget = h.prevEp;
+  lastMoveFrom = h.prevLastFrom; lastMoveTo = h.prevLastTo;
+  selectedSq = null; legalTargets = [];
+  boardEl.innerHTML = '';
+  renderBoard(); updateUI();
+  playSound('move_self');
+}
+
+// ========== FEN 生成（给 Stockfish 用） ==========
+function generateFEN() {
+  let fen = '';
+  for (let r = 8; r >= 1; r--) {
+    let empty = 0;
+    for (let i = 0; i < 8; i++) {
+      const pc = board[sqKey(FILES[i], r)];
+      if (!pc) empty++;
+      else { if (empty) { fen += empty; empty = 0; } fen += pc.color === 'w' ? pc.type.toUpperCase() : pc.type; }
+    }
+    if (empty) fen += empty;
+    if (r > 1) fen += '/';
+  }
+  fen += ` ${aiColor} `;
+  let c = '';
+  if (castlingRights.wK) c += 'K'; if (castlingRights.wQ) c += 'Q';
+  if (castlingRights.bK) c += 'k'; if (castlingRights.bQ) c += 'q';
+  fen += c || '-';
+  fen += ' ' + (epTarget || '-');
+  fen += ' 0 1';
+  return fen;
+}
+
+// ========== Stockfish 引擎 ==========
+function initStockfish() {
+  return new Promise(resolve => {
+    let resolved = false;
+    const done = () => { if (!resolved) { resolved = true; resolve(); } };
+    try {
+      stockfish = new Worker(STOCKFISH_URL);
+      stockfish.onmessage = e => {
+        const line = typeof e.data === 'string' ? e.data : '';
+        if (line === 'uciok') { sfReady = true; done(); }
+        if (line === 'readyok') sfReady = true;
+        if (line.startsWith('bestmove')) {
+          const mv = line.split(/\s+/)[1];
+          if (mv && mv.length >= 4) onSFResponse(mv);
+          else { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 500); }
+        }
+      };
+      stockfish.onerror = () => { stockfish = null; done(); };
+      stockfish.postMessage('uci');
+      setTimeout(done, 3000);
+    } catch(e) { stockfish = null; done(); }
+  });
+}
+function sfSend(cmd) { if (stockfish) stockfish.postMessage(cmd); }
+function sfSetSkill(lv) { sfSend(`setoption name Skill Level value ${lv}`); sfSend('isready'); }
+
+// ========== AI 逻辑（轮询 + 随机延迟） ==========
+function aiPoll() {
+  if (gameOver || aiState !== 'IDLE') return;
+  const available = getAvailableMoves(aiColor);
+  if (!available.length) { aiTimer = setTimeout(aiPoll, 500); return; }
+  // 能吃王就立刻吃
+  const kingCap = available.find(m => board[m.to]?.type === 'k');
+  if (kingCap) { aiExecuteMove(kingCap.from, kingCap.to); return; }
+  // 问 Stockfish
+  aiState = 'THINKING';
+  sfSetSkill(skillLevel);
+  sfSend(`position fen ${generateFEN()}`);
+  sfSend(`go depth ${Math.max(1, Math.ceil(skillLevel * 1.2))}`);
+}
+
+function onSFResponse(uciMove) {
+  if (aiState !== 'THINKING') return;
+  const from = uciMove.slice(0, 2), to = uciMove.slice(2, 4), promo = uciMove[4];
+  const now = Date.now();
+  // 冷却检查
+  if (cooldowns[from] && cooldowns[from] > now) { pickFallback(); return; }
+  // 合法性检查
+  if (!getPseudoLegalMoves(from).includes(to)) { pickFallback(); return; }
+  aiScheduleMove(from, to, promo);
+}
+
+function pickFallback() {
+  const available = getAvailableMoves(aiColor);
+  if (available.length) {
+    const pick = available[Math.floor(Math.random() * available.length)];
+    aiScheduleMove(pick.from, pick.to);
+  } else {
+    aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 500);
+  }
+}
+
+function aiScheduleMove(from, to, promo) {
+  aiState = 'WAITING';
+  const delay = 500 + Math.random() * 1000;
+  aiTimer = setTimeout(() => aiExecuteMove(from, to, promo), delay);
+}
+
+function aiExecuteMove(from, to, promo) {
+  if (gameOver) { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 500); return; }
+  if (!board[from] || board[from].color !== aiColor) { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 500); return; }
+  // 升变检查
+  const pc = board[from];
+  if (pc.type === 'p' && parseInt(to[1]) === (aiColor === 'w' ? 8 : 1) && !promo) promo = 'q';
+  finishPendingAnimation();
+  // 先渲染旧状态，确保 DOM 中棋子在 from 位置
+  renderBoard();
+  // 更新棋盘数据
+  const winner = executeMove(from, to, promo);
+  updateUI();
+  if (winner) { renderBoard(); endGame(winner); return; }
+  aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 300);
+  // 动画：从旧位置滑到新位置，结束后渲染新状态
+  animateMove(from, to, () => { renderBoard(); });
+}
+
+function startAI() { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 2000); }
+function stopAI() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } aiState = 'IDLE'; }
+
+// ========== 完成待处理动画 ==========
+let pendingAnimTimer = null;
+function finishPendingAnimation() {
+  if (pendingAnimTimer) { clearTimeout(pendingAnimTimer); pendingAnimTimer = null; }
+  // 清理所有动画残留样式
+  boardEl.querySelectorAll('.piece').forEach(el => {
+    el.style.position = ''; el.style.width = ''; el.style.height = '';
+    el.style.zIndex = ''; el.style.transition = ''; el.style.transform = '';
+    el.style.opacity = '';
+  });
+  // 移除被隐藏的被吃棋子（opacity=0 的多余元素）
+  boardEl.querySelectorAll('.piece').forEach(el => {
+    const sq = el.closest('.square');
+    if (!sq) return;
+    const k = sq.dataset.key;
+    const pc = board[k];
+    // 如果该格没有棋子数据，但 DOM 中有，说明是被吃残留
+    if (!pc) el.remove();
+    // 如果棋子类型/颜色不匹配，也移除
+    else if (el.dataset.type !== pc.type || el.dataset.color !== pc.color) el.remove();
+  });
+}
+
+// ========== 走法动画 ==========
+function animateMove(from, to, onDone) {
+  const fromSq = $(`.square[data-key="${from}"]`, boardEl);
+  const toSq = $(`.square[data-key="${to}"]`, boardEl);
+  const pieceEl = fromSq ? fromSq.querySelector('.piece') : null;
+  if (pieceEl && fromSq && toSq) {
+    const capturedPiece = toSq.querySelector('.piece');
+    if (capturedPiece) capturedPiece.style.opacity = '0';
+    const sqSize = fromSq.getBoundingClientRect();
+    pieceEl.style.position = 'absolute';
+    pieceEl.style.width = sqSize.width + 'px';
+    pieceEl.style.height = sqSize.height + 'px';
+    pieceEl.style.zIndex = '10';
+    toSq.appendChild(pieceEl);
+    const r1 = fromSq.getBoundingClientRect(), r2 = toSq.getBoundingClientRect();
+    pieceEl.style.transition = 'none';
+    pieceEl.style.transform = `translate(${r1.left - r2.left}px,${r1.top - r2.top}px)`;
+    pieceEl.offsetHeight;
+    pieceEl.style.transition = `transform ${ANIM_DURATION}ms ease`;
+    pieceEl.style.transform = 'translate(0,0)';
+    pendingAnimTimer = setTimeout(() => {
+      pendingAnimTimer = null;
+      pieceEl.style.position = ''; pieceEl.style.width = ''; pieceEl.style.height = '';
+      pieceEl.style.zIndex = ''; pieceEl.style.transition = ''; pieceEl.style.transform = '';
+      if (capturedPiece && capturedPiece.parentNode) capturedPiece.remove();
+      if (onDone) onDone();
+    }, ANIM_DURATION);
+  } else { if (onDone) onDone(); }
+}
+
+// ========== 渲染 ==========
+function createPieceElement(pc) {
+  const el = document.createElement('div');
+  el.className = 'piece';
+  el.dataset.type = pc.type; el.dataset.color = pc.color;
+  const img = document.createElement('img');
+  img.src = pieceSvgUrl(pc); img.alt = pc.color + pc.type; img.draggable = false;
+  el.appendChild(img);
+  return el;
+}
+
+function renderBoard() {
+  const now = Date.now();
+  // 首次渲染：构建所有格子
+  if (!boardEl.children.length) {
+    for (let ri = 0; ri < 8; ri++) {
+      for (let fi = 0; fi < 8; fi++) {
+        const row = isFlipped ? 7 - ri : ri, col = isFlipped ? 7 - fi : fi;
+        const f = FILES[col], r = String(8 - row), k = f + r;
+        const isLight = (row + col) % 2 === 0;
+        const div = document.createElement('div');
+        div.className = 'square ' + (isLight ? 'light' : 'dark');
+        div.dataset.key = k;
+        const pc = board[k];
+        if (pc) div.appendChild(createPieceElement(pc));
+        boardEl.appendChild(div);
+      }
+    }
+  }
+  // 增量更新
+  boardEl.querySelectorAll('.square').forEach(div => {
+    const k = div.dataset.key;
+    const col = FILES.indexOf(k[0]), row = 8 - parseInt(k[1]);
+    const pc = board[k];
+    const isLight = (row + col) % 2 === 0;
+    // 更新 class
+    div.className = 'square ' + (isLight ? 'light' : 'dark');
+    if (k === lastMoveFrom || k === lastMoveTo) div.classList.add('last-move');
+    if (k === selectedSq) div.classList.add('selected');
+    // 合法走法提示
+    div.querySelectorAll('.legal-dot,.legal-ring').forEach(el => el.remove());
+    if (legalTargets.includes(k)) {
+      if (pc) { const ring = document.createElement('div'); ring.className = 'legal-ring'; div.appendChild(ring); }
+      else { const dot = document.createElement('div'); dot.className = 'legal-dot'; div.appendChild(dot); }
+    }
+    // 棋子
+    const existingPiece = div.querySelector('.piece');
+    const needPiece = !!pc;
+    if (needPiece && !existingPiece) div.appendChild(createPieceElement(pc));
+    else if (!needPiece && existingPiece) existingPiece.remove();
+    else if (needPiece && existingPiece) {
+      if (existingPiece.dataset.type !== pc.type || existingPiece.dataset.color !== pc.color) {
+        existingPiece.remove(); div.appendChild(createPieceElement(pc));
+      }
+    }
+    // 冷却 UI
+    const piece = div.querySelector('.piece');
+    let cdEl = div.querySelector('.cooldown');
+    const cdEnd = cooldowns[k];
+    if (piece && cdEnd && cdEnd > now) {
+      piece.classList.add('on-cooldown');
+      if (!cdEl) { cdEl = document.createElement('div'); cdEl.className = 'cooldown'; div.appendChild(cdEl); }
+      cdEl.textContent = ((cdEnd - now) / 1000).toFixed(1);
+    } else {
+      if (piece) piece.classList.remove('on-cooldown');
+      if (cdEl) cdEl.remove();
+    }
+  });
+}
+
+// 冷却倒计时循环
+let cdRAF = null;
+function cooldownLoop() {
+  if (gameOver) return;
+  const now = Date.now();
+  boardEl.querySelectorAll('.square').forEach(div => {
+    const k = div.dataset.key;
+    const cdEnd = cooldowns[k];
+    const piece = div.querySelector('.piece');
+    let cdEl = div.querySelector('.cooldown');
+    if (cdEnd && cdEnd > now) {
+      if (piece) piece.classList.add('on-cooldown');
+      if (!cdEl) { cdEl = document.createElement('div'); cdEl.className = 'cooldown'; div.appendChild(cdEl); }
+      cdEl.textContent = ((cdEnd - now) / 1000).toFixed(1);
+    } else {
+      if (piece) piece.classList.remove('on-cooldown');
+      if (cdEl) cdEl.remove();
+    }
+  });
+  cdRAF = requestAnimationFrame(cooldownLoop);
+}
+
+function updateCoords() {
+  const files = isFlipped ? [...FILES].reverse() : FILES;
+  const ranks = isFlipped ? '12345678'.split('') : '87654321'.split('');
+  $('#coordTop').innerHTML = files.map(f => `<span>${f}</span>`).join('');
+  $('#coordBottom').innerHTML = files.map(f => `<span>${f}</span>`).join('');
+  $('#coordLeft').innerHTML = ranks.map(r => `<span>${r}</span>`).join('');
+  $('#coordRight').innerHTML = ranks.map(r => `<span>${r}</span>`).join('');
+}
+
+function updateUI() {
+  const topColor = isFlipped ? 'w' : 'b', botColor = isFlipped ? 'b' : 'w';
+  const whiteCaptures = [], blackCaptures = [];
+  for (const h of moveHistory) {
+    if (h.captured) {
+      if (h.captured.color === 'b') whiteCaptures.push(h.captured);
+      else blackCaptures.push(h.captured);
+    }
+  }
+  const topCap = topColor === 'w' ? whiteCaptures : blackCaptures;
+  const botCap = botColor === 'w' ? whiteCaptures : blackCaptures;
+  const sortCap = arr => [...arr].sort((a, b) => PIECE_VALUE[b.type] - PIECE_VALUE[a.type]);
+  const wVal = whiteCaptures.reduce((s, p) => s + PIECE_VALUE[p.type], 0);
+  const bVal = blackCaptures.reduce((s, p) => s + PIECE_VALUE[p.type], 0);
+  const diff = wVal - bVal;
+  const topAdv = topColor === 'w' ? diff : -diff;
+  const botAdv = botColor === 'w' ? diff : -diff;
+  const advHtml = v => v > 0 ? `<span class="adv">+${v}</span>` : '';
+  $('#capTop').innerHTML = sortCap(topCap).map(p => `<img src="${pieceSvgUrl(p)}" alt="${p.color}${p.type}">`).join('') + advHtml(topAdv);
+  $('#capBottom').innerHTML = sortCap(botCap).map(p => `<img src="${pieceSvgUrl(p)}" alt="${p.color}${p.type}">`).join('') + advHtml(botAdv);
+}
+
+function setStatus(text, cls) {
+  statusBar.textContent = text;
+  statusBar.className = 'status-bar';
+  if (cls) statusBar.classList.add(cls);
+}
+
+// ========== 游戏结束 ==========
+function endGame(winner) {
+  stopAI();
+  if (cdRAF) cancelAnimationFrame(cdRAF);
+  const playerWon = winner === playerColor;
+  // 1-0 白胜, 0-1 黑胜
+  const scoreText = winner === 'w' ? '1-0' : '0-1';
+  setStatus(playerWon ? '你赢了！' : '你输了', 'ended');
+  playSound(playerWon ? 'capture' : 'timeout');
+  setTimeout(() => {
+    $('#gameOverScore').textContent = scoreText;
+    $('#gameOverRecord').textContent = '';
+    $('#gameOverModal').classList.add('show');
+  }, 400);
+}
+
+// ========== 点击处理 ==========
+boardEl.addEventListener('click', e => {
+  if (gameOver) return;
+  const sq = e.target.closest('.square');
+  if (!sq) return;
+  const k = sq.dataset.key;
+  const pc = board[k];
+  const now = Date.now();
+
+  if (selectedSq) {
+    if (k === selectedSq) { selectedSq = null; legalTargets = []; renderBoard(); return; }
+    if (legalTargets.includes(k)) {
+      // 升变检查
+      const selPc = board[selectedSq];
+      if (selPc && selPc.type === 'p' && parseInt(k[1]) === (playerColor === 'w' ? 8 : 1)) {
+        showPromotion(selectedSq, k); return;
+      }
+      playerMove(selectedSq, k);
+      return;
+    }
+    // 点击己方其他可用棋子
+    if (pc && pc.color === playerColor && (!cooldowns[k] || cooldowns[k] <= now)) {
+      selectPiece(k); return;
+    }
+    // 点击冷却中的己方棋子
+    if (pc && pc.color === playerColor && cooldowns[k] && cooldowns[k] > now) {
+      playSound('illegal'); return;
+    }
+    playSound('illegal'); return;
+  }
+  // 选中己方棋子
+  if (pc && pc.color === playerColor) {
+    if (cooldowns[k] && cooldowns[k] > now) { playSound('illegal'); return; }
+    selectPiece(k);
+  }
+});
+
+function selectPiece(k) {
+  selectedSq = k;
+  legalTargets = getPseudoLegalMoves(k);
+  renderBoard();
+  if (!legalTargets.length) playSound('illegal');
+}
+
+function playerMove(from, to, promotion) {
+  finishPendingAnimation();
+  // 先渲染旧状态，确保 DOM 中棋子在 from 位置
+  renderBoard();
+  // 更新棋盘数据
+  const winner = executeMove(from, to, promotion);
+  selectedSq = null; legalTargets = [];
+  updateUI();
+  if (winner) { renderBoard(); endGame(winner); return; }
+  // 动画：从旧位置滑到新位置，结束后渲染新状态
+  animateMove(from, to, () => { renderBoard(); });
+}
+
+// ========== 升变对话框 ==========
+function showPromotion(from, to) {
+  const color = playerColor;
+  const opts = $('#promoOptions');
+  opts.innerHTML = '';
+  for (const type of ['q', 'r', 'b', 'n']) {
+    const btn = document.createElement('div');
+    btn.className = 'promo-opt';
+    const img = document.createElement('img');
+    img.src = pieceSvgUrl({ type, color }); img.alt = type;
+    btn.appendChild(img);
+    btn.onclick = () => {
+      $('#promoModal').classList.remove('show');
+      playerMove(from, to, type);
+    };
+    opts.appendChild(btn);
+  }
+  $('#promoModal').classList.add('show');
+}
+
+// ========== 响应式布局 ==========
+let _resizeHandler = null;
+function setupLayout() {
+  const pageArea = $('.page-area'), boardArea = $('.board-area');
+  if (!pageArea || !boardArea) return;
+  if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
+  function calc() {
+    const rect = pageArea.getBoundingClientRect();
+    const pw = rect.width, ph = rect.height;
+    if (pw <= 0 || ph <= 0) return;
+    const isLandscape = pw > ph;
+    const container = $('.game-container');
+    if (container) { container.classList.toggle('landscape', isLandscape); container.classList.toggle('portrait', !isLandscape); }
+    if (isLandscape) { const size = Math.max(200, Math.min(ph, pw - 108)); boardArea.style.width = size + 'px'; boardArea.style.height = size + 'px'; }
+    else { const size = Math.max(200, Math.min(pw, ph - 96)); boardArea.style.width = size + 'px'; boardArea.style.height = ''; }
+  }
+  _resizeHandler = calc; calc(); window.addEventListener('resize', _resizeHandler);
+}
+
+// ========== 新游戏 ==========
+function newGame() {
+  stopAI();
+  if (cdRAF) cancelAnimationFrame(cdRAF);
+  aiColor = playerColor === 'w' ? 'b' : 'w';
+  initBoard();
+  boardEl.innerHTML = '';
+  setStatus('你的回合');
+  renderBoard(); updateUI();
+  setupLayout(); updateCoords();
+  cooldownLoop();
+  startAI();
+}
+
+// ========== 事件绑定 ==========
+$('#btnNew').onclick = newGame;
+$('#gameOverRestartBtn').onclick = newGame;
+$('#btnUndo').onclick = undoMove;
+$('#btnInfo').onclick = () => $('#infoModal').classList.add('show');
+$('#infoModal').onclick = e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove('show'); };
+$('#modalCloseBtn').onclick = () => $('#infoModal').classList.remove('show');
+$('#gameOverCloseBtn').onclick = () => $('#gameOverModal').classList.remove('show');
+$('#gameOverModal').onclick = e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove('show'); };
+$('#settingsModal').onclick = e => { if (e.target === e.currentTarget) e.currentTarget.classList.remove('show'); };
+$('#promoModal').onclick = e => { if (e.target === e.currentTarget) { e.currentTarget.classList.remove('show'); } };
+
+// 设置对话框
+$('#btnSettings').onclick = () => {
+  $(`input[name=playerColor][value=${playerColor}]`).checked = true;
+  $(`input[name=skillLevel][value="${skillLevel}"]`).checked = true;
+  $('#settingsModal').classList.add('show');
+};
+$('#settingsCancelBtn').onclick = () => $('#settingsModal').classList.remove('show');
+$('#settingsOkBtn').onclick = () => {
+  const colorVal = $('input[name=playerColor]:checked')?.value || 'w';
+  const skillVal = parseInt($('input[name=skillLevel]:checked')?.value || '10');
+  playerColor = colorVal; skillLevel = skillVal;
+  isFlipped = colorVal === 'b';
+  $('#settingsModal').classList.remove('show');
+  updateCoords();
+  newGame();
+};
+
+// 规则文字
+$('#modalText').textContent = '实时冷却对战：与 Stockfish AI 对弈，双方可随时走子！\n\n每个棋子移动后进入 5 秒冷却，冷却结束才能再次移动。\n冷却中的棋子会变暗，上方显示剩余时间。\n\n允许走入被将状态，但王被吃掉即判负！\n\n点击己方棋子选中，再点击目标格走子。';
+
+// ========== 初始化 ==========
+setupLayout(); updateCoords();
+initBoard();
+setStatus('加载引擎...');
+renderBoard(); updateUI();
+
+(async function loadEngine() {
+  await initStockfish();
+  sfSetSkill(skillLevel);
+  if (!sfReady) setStatus('引擎加载失败，仅可走子', 'ended');
+  else { setStatus('你的回合'); cooldownLoop(); startAI(); }
+})();
+
+try {
+  if (!localStorage.getItem('chessRushVisited')) {
+    localStorage.setItem('chessRushVisited', '1');
+    setTimeout(() => $('#infoModal').classList.add('show'), 500);
+  }
+  wins = parseInt(localStorage.getItem('chessRushWins')) || 0;
+} catch(e) {}
+</script>
+</body>
+</html>
