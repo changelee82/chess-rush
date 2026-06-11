@@ -361,6 +361,7 @@ html, body {
   color: rgba(0,0,0,0.87);
   line-height: 1.5;
   margin-bottom: 24px;
+  white-space: pre-line;
 }
 .modal-actions {
   display: flex;
@@ -674,7 +675,7 @@ let playerColor = 'w';
 let aiColor = 'b';
 let skillLevel = 10;
 let moveHistory = [];
-let wins = 0;
+let isPlayerAnimating = false;
 
 // Stockfish
 let stockfish = null, sfReady = false;
@@ -694,15 +695,81 @@ function pieceNum(pc) {
 }
 function pieceSvgUrl(pc) { return `Chessman/fritz/${pieceNum(pc)}.svg`; }
 
+// ========== 攻击检测 ==========
+function isSquareAttacked(sq, byColor) {
+  const f = sq[0], r = parseInt(sq[1]);
+  const fi = FILES.indexOf(f);
+  const ok = (i, r2) => i >= 0 && i < 8 && r2 >= 1 && r2 <= 8;
+  // 马
+  for (const [df, dr] of [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]]) {
+    const ni = fi + df, nr = r + dr;
+    if (ok(ni, nr)) { const k = sqKey(FILES[ni], nr); if (board[k]?.color === byColor && board[k].type === 'n') return true; }
+  }
+  // 王（仅相邻格）
+  for (const [df, dr] of [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]]) {
+    const ni = fi + df, nr = r + dr;
+    if (ok(ni, nr)) { const k = sqKey(FILES[ni], nr); if (board[k]?.color === byColor && board[k].type === 'k') return true; }
+  }
+  // 兵
+  const pawnDir = byColor === 'w' ? -1 : 1;
+  for (const df of [-1, 1]) {
+    const ni = fi + df, nr = r + pawnDir;
+    if (ok(ni, nr)) { const k = sqKey(FILES[ni], nr); if (board[k]?.color === byColor && board[k].type === 'p') return true; }
+  }
+  // 滑行棋子
+  const slideAttack = (dirs, types) => {
+    for (const [df, dr] of dirs) {
+      let ci = fi + df, cr = r + dr;
+      while (ok(ci, cr)) {
+        const k = sqKey(FILES[ci], cr);
+        if (board[k]) { if (board[k].color === byColor && types.includes(board[k].type)) return true; break; }
+        ci += df; cr += dr;
+      }
+    }
+  };
+  if (slideAttack([[1,1],[1,-1],[-1,1],[-1,-1]], ['b','q'])) return true;
+  if (slideAttack([[1,0],[-1,0],[0,1],[0,-1]], ['r','q'])) return true;
+  return false;
+}
+
+function isInCheck(color) {
+  const enemy = color === 'w' ? 'b' : 'w';
+  for (const k of Object.keys(board)) {
+    if (board[k].type === 'k' && board[k].color === color) return isSquareAttacked(k, enemy);
+  }
+  return false;
+}
+
+// 验证走法是否合法（走后己方王不被将）
+function isLegalMove(from, to, color, promo) {
+  if (!getPseudoLegalMoves(from).includes(to)) return false;
+  // 模拟走子
+  const sim = Object.fromEntries(Object.entries(board).map(([k, v]) => [k, { ...v }]));
+  const sp = { ...sim[from] };
+  if (sp.type === 'p' && to === epTarget) { const d = sp.color === 'w' ? -1 : 1; delete sim[sqKey(to[0], parseInt(to[1]) + d)]; }
+  sim[to] = sp; delete sim[from];
+  if (sp.type === 'p' && parseInt(to[1]) === (color === 'w' ? 8 : 1)) sim[to] = { type: promo || 'q', color };
+  if (sp.type === 'k' && Math.abs(FILES.indexOf(to[0]) - FILES.indexOf(from[0])) === 2) {
+    if (FILES.indexOf(to[0]) > FILES.indexOf(from[0])) { sim[sqKey(FILES[5], to[1])] = sim[sqKey(FILES[7], to[1])]; delete sim[sqKey(FILES[7], to[1])]; }
+    else { sim[sqKey(FILES[3], to[1])] = sim[sqKey(FILES[0], to[1])]; delete sim[sqKey(FILES[0], to[1])]; }
+  }
+  const orig = board; board = sim;
+  const check = isInCheck(color);
+  board = orig;
+  return !check;
+}
+
 // ========== 音效 ==========
 const soundCache = {};
 ['capture','check','illegal','move_self','timeout'].forEach(n => {
-  soundCache[n] = new Audio(`sounds/${n}.mp3`);
+  const a = new Audio(`sounds/${n}.mp3`);
+  a.preload = 'auto';
+  soundCache[n] = a;
 });
 function playSound(name) {
   try {
-    const a = soundCache[name]?.cloneNode();
-    if (a) { a.volume = 0.3; a.play().catch(() => {}); }
+    const src = soundCache[name]?.src;
+    if (src) { const a = new Audio(src); a.volume = 0.3; a.play().catch(() => {}); }
   } catch(e) {}
 }
 
@@ -765,9 +832,7 @@ function getPseudoLegalMoves(sq) {
           const nk = sqKey(FILES[ni], r + dir);
           if (isEnemy(nk)) moves.push(nk);
           else if (nk === epTarget) {
-            // 吃过路兵：目标格旁边必须有对方刚走两格的兵
-            const epPawnSq = sqKey(nk[0], color === 'w' ? parseInt(nk[1]) - 1 : parseInt(nk[1]) + 1);
-            if (board[epPawnSq] && board[epPawnSq].type === 'p' && board[epPawnSq].color !== color) moves.push(nk);
+            moves.push(nk);
           }
         }
       }
@@ -786,10 +851,22 @@ function getPseudoLegalMoves(sq) {
         if (ok(fi + df, r + dr)) tryAdd(sqKey(FILES[fi + df], r + dr));
       }
       const home = color === 'w' ? 1 : 8;
+      const enemy = color === 'w' ? 'b' : 'w';
       if (r === home) {
-        if (castlingRights[color + 'K'] && isEmpty(sqKey(FILES[5], home)) && isEmpty(sqKey(FILES[6], home)))
+        const now = Date.now();
+        const rookK = board[sqKey(FILES[7], home)];
+        const rookQ = board[sqKey(FILES[0], home)];
+        const rookKReady = rookK?.type === 'r' && rookK?.color === color && (!cooldowns[sqKey(FILES[7], home)] || cooldowns[sqKey(FILES[7], home)] <= now);
+        const rookQReady = rookQ?.type === 'r' && rookQ?.color === color && (!cooldowns[sqKey(FILES[0], home)] || cooldowns[sqKey(FILES[0], home)] <= now);
+        if (castlingRights[color + 'K'] && rookKReady && isEmpty(sqKey(FILES[5], home)) && isEmpty(sqKey(FILES[6], home))
+            && !isSquareAttacked(sqKey(FILES[4], home), enemy)
+            && !isSquareAttacked(sqKey(FILES[5], home), enemy)
+            && !isSquareAttacked(sqKey(FILES[6], home), enemy))
           moves.push(sqKey(FILES[6], home));
-        if (castlingRights[color + 'Q'] && isEmpty(sqKey(FILES[3], home)) && isEmpty(sqKey(FILES[2], home)) && isEmpty(sqKey(FILES[1], home)))
+        if (castlingRights[color + 'Q'] && rookQReady && isEmpty(sqKey(FILES[3], home)) && isEmpty(sqKey(FILES[2], home)) && isEmpty(sqKey(FILES[1], home))
+            && !isSquareAttacked(sqKey(FILES[4], home), enemy)
+            && !isSquareAttacked(sqKey(FILES[3], home), enemy)
+            && !isSquareAttacked(sqKey(FILES[2], home), enemy))
           moves.push(sqKey(FILES[2], home));
       }
       break;
@@ -852,10 +929,8 @@ function executeMove(from, to, promotion) {
     if (from === 'a1') castlingRights.wQ = false; if (from === 'h1') castlingRights.wK = false;
     if (from === 'a8') castlingRights.bQ = false; if (from === 'h8') castlingRights.bK = false;
   }
-  for (const t of [to]) {
-    if (t === 'a1') castlingRights.wQ = false; if (t === 'h1') castlingRights.wK = false;
-    if (t === 'a8') castlingRights.bQ = false; if (t === 'h8') castlingRights.bK = false;
-  }
+  if (to === 'a1') castlingRights.wQ = false; if (to === 'h1') castlingRights.wK = false;
+  if (to === 'a8') castlingRights.bQ = false; if (to === 'h8') castlingRights.bK = false;
   // 冷却
   delete cooldowns[from];
   cooldowns[to] = Date.now() + COOLDOWN_MS;
@@ -865,22 +940,6 @@ function executeMove(from, to, promotion) {
   // 王被吃？
   if (captured && captured.type === 'k') { gameOver = true; return captured.color === 'w' ? 'b' : 'w'; }
   return null;
-}
-
-// ========== 悔棋 ==========
-function undoMove() {
-  if (!moveHistory.length || gameOver) return;
-  finishPendingAnimation();
-  const h = moveHistory.pop();
-  board = h.prevBoard;
-  cooldowns = h.prevCooldowns;
-  castlingRights = h.prevCastling;
-  epTarget = h.prevEp;
-  lastMoveFrom = h.prevLastFrom; lastMoveTo = h.prevLastTo;
-  selectedSq = null; legalTargets = [];
-  boardEl.innerHTML = '';
-  renderBoard(); updateUI();
-  playSound('move_self');
 }
 
 // ========== FEN 生成（给 Stockfish 用） ==========
@@ -941,7 +1000,14 @@ function aiPoll() {
   const kingCap = available.find(m => board[m.to]?.type === 'k');
   if (kingCap) { aiExecuteMove(kingCap.from, kingCap.to); return; }
   // 问 Stockfish
+  // 检查双方王是否存在，避免向 Stockfish 发送非法局面
+  let hasWK = false, hasBK = false;
+  for (const k of Object.keys(board)) {
+    if (board[k].type === 'k') { if (board[k].color === 'w') hasWK = true; else hasBK = true; }
+  }
+  if (!hasWK || !hasBK) { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 500); return; }
   aiState = 'THINKING';
+  setStatus('AI 思考中...', 'thinking');
   sfSetSkill(skillLevel);
   sfSend(`position fen ${generateFEN()}`);
   sfSend(`go depth ${Math.max(1, Math.ceil(skillLevel * 1.2))}`);
@@ -953,8 +1019,8 @@ function onSFResponse(uciMove) {
   const now = Date.now();
   // 冷却检查
   if (cooldowns[from] && cooldowns[from] > now) { pickFallback(); return; }
-  // 合法性检查
-  if (!getPseudoLegalMoves(from).includes(to)) { pickFallback(); return; }
+  // 合法性检查：伪合法 + 走后己方王不被将
+  if (!isLegalMove(from, to, aiColor, promo)) { pickFallback(); return; }
   aiScheduleMove(from, to, promo);
 }
 
@@ -977,6 +1043,7 @@ function aiScheduleMove(from, to, promo) {
 function aiExecuteMove(from, to, promo) {
   if (gameOver) { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 500); return; }
   if (!board[from] || board[from].color !== aiColor) { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 500); return; }
+  if (isPlayerAnimating) { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 200); return; }
   // 升变检查
   const pc = board[from];
   if (pc.type === 'p' && parseInt(to[1]) === (aiColor === 'w' ? 8 : 1) && !promo) promo = 'q';
@@ -987,9 +1054,12 @@ function aiExecuteMove(from, to, promo) {
   const winner = executeMove(from, to, promo);
   updateUI();
   if (winner) { animateMove(from, to, () => { renderBoard(); endGame(winner); }); return; }
-  aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 300);
-  // 动画：从旧位置滑到新位置，结束后渲染新状态
-  animateMove(from, to, () => { renderBoard(); });
+  const inCheck = isInCheck(playerColor);
+  animateMove(from, to, () => {
+    renderBoard();
+    if (inCheck) setStatus('将军！你的回合'); else setStatus('你的回合');
+    aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 300);
+  });
 }
 
 function startAI() { aiState = 'IDLE'; aiTimer = setTimeout(aiPoll, 2000); }
@@ -997,8 +1067,11 @@ function stopAI() { if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; } aiSt
 
 // ========== 完成待处理动画 ==========
 let pendingAnimTimer = null;
+let pendingAnimCallback = null;
 function finishPendingAnimation() {
   if (pendingAnimTimer) { clearTimeout(pendingAnimTimer); pendingAnimTimer = null; }
+  const cb = pendingAnimCallback; pendingAnimCallback = null;
+  isPlayerAnimating = false;
   // 清理所有动画残留样式
   boardEl.querySelectorAll('.piece').forEach(el => {
     el.style.position = ''; el.style.width = ''; el.style.height = '';
@@ -1016,12 +1089,14 @@ function finishPendingAnimation() {
     // 如果棋子类型/颜色不匹配，也移除
     else if (el.dataset.type !== pc.type || el.dataset.color !== pc.color) el.remove();
   });
+  // 执行被中断的回调（确保 AI 状态不会卡住）
+  if (cb) cb();
 }
 
 // ========== 走法动画 ==========
 function animateMove(from, to, onDone) {
-  const fromSq = $(`.square[data-key="${from}"]`, boardEl);
-  const toSq = $(`.square[data-key="${to}"]`, boardEl);
+  const fromSq = boardEl.querySelector(`.square[data-key="${from}"]`);
+  const toSq = boardEl.querySelector(`.square[data-key="${to}"]`);
   const pieceEl = fromSq ? fromSq.querySelector('.piece') : null;
   if (pieceEl && fromSq && toSq) {
     const capturedPiece = toSq.querySelector('.piece');
@@ -1038,8 +1113,9 @@ function animateMove(from, to, onDone) {
     pieceEl.offsetHeight;
     pieceEl.style.transition = `transform ${ANIM_DURATION}ms ease`;
     pieceEl.style.transform = 'translate(0,0)';
+    pendingAnimCallback = onDone;
     pendingAnimTimer = setTimeout(() => {
-      pendingAnimTimer = null;
+      pendingAnimTimer = null; pendingAnimCallback = null;
       pieceEl.style.position = ''; pieceEl.style.width = ''; pieceEl.style.height = '';
       pieceEl.style.zIndex = ''; pieceEl.style.transition = ''; pieceEl.style.transform = '';
       if (capturedPiece && capturedPiece.parentNode) capturedPiece.remove();
@@ -1087,6 +1163,8 @@ function renderBoard() {
     div.className = 'square ' + (isLight ? 'light' : 'dark');
     if (k === lastMoveFrom || k === lastMoveTo) div.classList.add('last-move');
     if (k === selectedSq) div.classList.add('selected');
+    // 将军高亮
+    if (pc && pc.type === 'k' && isInCheck(pc.color)) div.classList.add('in-check');
     // 合法走法提示
     div.querySelectorAll('.legal-dot,.legal-ring').forEach(el => el.remove());
     if (legalTargets.includes(k)) {
@@ -1255,9 +1333,16 @@ function playerMove(from, to, promotion) {
   const winner = executeMove(from, to, promotion);
   selectedSq = null; legalTargets = [];
   updateUI();
-  if (winner) { animateMove(from, to, () => { renderBoard(); endGame(winner); }); return; }
-  // 动画：从旧位置滑到新位置，结束后渲染新状态
-  animateMove(from, to, () => { renderBoard(); });
+  if (winner) { isPlayerAnimating = true; animateMove(from, to, () => { isPlayerAnimating = false; renderBoard(); endGame(winner); }); return; }
+  const aiInCheck = isInCheck(aiColor);
+  if (aiInCheck) playSound('check');
+  isPlayerAnimating = true;
+  animateMove(from, to, () => {
+    isPlayerAnimating = false;
+    renderBoard();
+    if (aiInCheck) setStatus('将军！', 'thinking');
+    else setStatus('你的回合');
+  });
 }
 // ========== 升变对话框 ==========
 function showPromotion(from, to) {
@@ -1362,7 +1447,6 @@ try {
     localStorage.setItem('chessRushVisited', '1');
     setTimeout(() => $('#infoModal').classList.add('show'), 500);
   }
-  wins = parseInt(localStorage.getItem('chessRushWins')) || 0;
 } catch(e) {}
 </script>
 </body>
