@@ -645,6 +645,7 @@ html, body {
       <label><input type="radio" name="aiDifficulty" value="easy" checked> 简单</label>
       <label><input type="radio" name="aiDifficulty" value="medium"> 中等</label>
       <label><input type="radio" name="aiDifficulty" value="hard"> 困难</label>
+      <label><input type="radio" name="aiDifficulty" value="hell"> 地狱</label>
     </p>
     <div class="modal-actions">
       <button class="md-btn" id="settingsCancelBtn">取消</button>
@@ -677,9 +678,10 @@ let playerColor = 'w';
 let aiColor = 'b';
 let aiDifficulty = localStorage.getItem('chessRushDifficulty') || 'easy'; // easy | medium | hard
 const AI_DIFFICULTY = {
-  easy:   { initialWait: 2000, pollInterval: 2000, thinkDelay: 1000 },
-  medium: { initialWait: 1000, pollInterval: 1000, thinkDelay: 500 },
-  hard:   { initialWait: 500,  pollInterval: 300,  thinkDelay: 0 },
+  easy:   { initialWait: 2000, pollInterval: 2000, thinkDelay: 1000, thinkTime: 1000 },
+  medium: { initialWait: 1000, pollInterval: 1000, thinkDelay: 500,  thinkTime: 1000 },
+  hard:   { initialWait: 500,  pollInterval: 300,  thinkDelay: 0,    thinkTime: 1000 },
+  hell:   { initialWait: 100,  pollInterval: 100,  thinkDelay: 0,    thinkTime: 500 },
 };
 let moveHistory = [];
 let isPlayerAnimating = false;
@@ -1025,7 +1027,7 @@ function aiPoll() {
   setStatus('AI 思考中...', 'thinking');
   sfSetSkill(20);
   sfSend(`position fen ${generateFEN()}`);
-  sfSend('go movetime 1000');
+  sfSend(`go movetime ${cfg.thinkTime}`);
 }
 
 function onSFResponse(uciMove) {
